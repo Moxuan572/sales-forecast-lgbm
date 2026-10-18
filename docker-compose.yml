@@ -1,22 +1,10 @@
-name: sales-forecast
-
 services:
   api:
     image: sales-forecast-api:latest
     container_name: sales-forecast-api
-    expose:
-      - "8000"
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    networks:
+      - app-net
+    restart: always
 
   nginx:
     image: nginx:alpine
@@ -24,8 +12,13 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
+      - api
+    networks:
+      - app-net
+    restart: always
+
+networks:
+  app-net:
+    driver: bridge
