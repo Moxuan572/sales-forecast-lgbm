@@ -1,0 +1,19 @@
+{
+  "date": "2025-12-29",
+  "sales_promotion": "Normal",
+  "holiday": 0,
+  "competitor_spend": 354750.0,
+  "instagram_spend": 65320.0,
+  "google_ads_spend": 0.0,
+  "tv_spend": 58950.0,
+  "youtube_spend": 38760.0,
+  "newspaper_spend": 5350.0,
+  "influencer_spend": 35010.0,
+  "ott_spend": 56360.0,
+  "sales_history": [
+    2489367.0,
+    2676494.0,
+    2747119.0,
+    2824619.0
+  ]
+}

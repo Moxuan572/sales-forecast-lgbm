@@ -1,0 +1,32 @@
+# Python 虚拟环境 / 缓存
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# 版本控制 / 编辑器
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# 训练与开发文件(运行镜像不需要)
+train.py
+train_model.py
+sample_payload.json
+*.ipynb
+*.md
+Dockerfile
+.dockerignore
+
+# 日志与临时文件
+*.log
+.env
+.env.*
+.DS_Store

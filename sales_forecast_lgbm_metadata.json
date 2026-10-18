@@ -1,0 +1,109 @@
+{
+  "model_file": "sales_forecast_lgbm.pkl",
+  "task": "weekly sales forecasting (regression)",
+  "target": "sales",
+  "data": {
+    "rows_raw": 209,
+    "date_range": [
+      "2022-01-03",
+      "2025-12-29"
+    ],
+    "spend_missing_filled_with_zero": {
+      "competitor_spend": 9,
+      "instagram_spend": 50,
+      "google_ads_spend": 80,
+      "tv_spend": 57,
+      "youtube_spend": 65,
+      "newspaper_spend": 64,
+      "influencer_spend": 59,
+      "ott_spend": 50
+    },
+    "target_missing_dropped": 3
+  },
+  "rows_used": 206,
+  "features": [
+    "holiday",
+    "sales_promotion",
+    "competitor_spend",
+    "instagram_spend",
+    "google_ads_spend",
+    "tv_spend",
+    "youtube_spend",
+    "newspaper_spend",
+    "influencer_spend",
+    "ott_spend",
+    "total_spend",
+    "n_active_channels",
+    "year",
+    "month",
+    "week",
+    "quarter",
+    "dayofyear",
+    "time_index",
+    "week_sin",
+    "week_cos",
+    "sales_lag_1",
+    "sales_lag_2",
+    "sales_lag_3",
+    "sales_lag_4",
+    "sales_roll_4_mean",
+    "sales_roll_4_std",
+    "sales_roll_8_mean",
+    "sales_roll_4_max",
+    "sales_roll_4_min",
+    "total_spend_lag_1",
+    "total_spend_roll_4_mean",
+    "competitor_spend_lag_1",
+    "instagram_spend_lag_1",
+    "google_ads_spend_lag_1",
+    "tv_spend_lag_1",
+    "youtube_spend_lag_1",
+    "newspaper_spend_lag_1",
+    "influencer_spend_lag_1",
+    "ott_spend_lag_1"
+  ],
+  "categorical_features": [
+    "sales_promotion"
+  ],
+  "lag_features": [
+    "sales_lag_1",
+    "sales_lag_2",
+    "sales_lag_3",
+    "sales_lag_4"
+  ],
+  "leakage_guard": "all lag/rolling features use shift(1)+; chronological split; no shuffling",
+  "train_period": [
+    "2022-01-03",
+    "2025-03-10"
+  ],
+  "test_period": [
+    "2025-03-17",
+    "2025-12-29"
+  ],
+  "params": {
+    "objective": "regression",
+    "n_estimators": 200,
+    "learning_rate": 0.02,
+    "num_leaves": 31,
+    "min_child_samples": 5,
+    "colsample_bytree": 0.8,
+    "subsample": 0.7,
+    "subsample_freq": 1,
+    "reg_lambda": 1.0,
+    "random_state": 42,
+    "n_jobs": 1,
+    "verbose": -1
+  },
+  "cv": {
+    "folds": 4,
+    "mean_MAE": 206180.9128946429,
+    "mean_R2": 0.405133908585343
+  },
+  "holdout_metrics": {
+    "MAE": 127477.20760049664,
+    "R2": 0.859302507074532,
+    "RMSE": 155671.19438409395,
+    "MAPE_%": 6.421937678665195
+  },
+  "note": "holdout metrics are from the model trained on the first split; the exported model is refit on all labeled rows"
+}

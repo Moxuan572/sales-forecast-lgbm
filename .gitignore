@@ -1,0 +1,17 @@
+# Python 虚拟环境 / 缓存
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# 本地配置与日志
+.env
+.env.*
+*.log
+.DS_Store
