@@ -282,6 +282,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Weekly Sales Forecast API",
+    lifespan=lifespan,
     swagger_ui_parameters={
         "swagger_ui_css": "https://cdn.staticfile.org/swagger-ui/4.15.5/swagger-ui.min.css",
         "swagger_ui_js": "https://cdn.staticfile.org/swagger-ui/4.15.5/swagger-ui-bundle.js"
