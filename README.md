@@ -18,7 +18,7 @@ FastAPI（sales-forecast-api）
 sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 ```
 
-只有 Nginx 向宿主机映射 80 端口；`api` 不映射端口，二者通过 `app-net` 桥接网络通信。FastAPI 的 8000 端口仅在 Docker 网络内可见。
+只有 Nginx 对外暴露 80 端口，FastAPI 的 8000 端口仅在 Docker 网络内可见。
 
 ## 目录结构
 
@@ -73,7 +73,7 @@ sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/health` | 健康检查，返回模型是否加载成功 |
-| `POST` | `/predict` | 预测单周销售额 |
+| `POST` | `/predict` | 预测单周销售额，并返回 ROAS 与投放建议 |
 | `GET` | `/docs` | Swagger UI |
 
 请求字段：
@@ -93,8 +93,31 @@ curl -X POST http://localhost/predict \
 ```
 
 ```json
-{"predicted_sales": 2434879.816363135}
+{
+  "predicted_sales": "2434879.82",
+  "predicted_roas": "3.96",
+  "action": "观察 (Observe)"
+}
 ```
+
+响应字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `predicted_sales` | string | 预测销售额，严格保留两位小数 |
+| `predicted_roas` | string | 预测 ROAS = 预测销售额 / 8 个渠道花费之和，严格保留两位小数 |
+| `action` | string | 基于 ROAS 的投放建议 |
+
+决策规则：
+
+| 条件 | action |
+|---|---|
+| `ROAS > 5.0` | `放量 (Scale Up)` |
+| `2.0 <= ROAS <= 5.0` | `观察 (Observe)` |
+| `ROAS < 2.0` | `止损 (Cut Loss)` |
+
+> 金额字段使用字符串返回，以确保始终保留两位小数（例如 `"5.00"`）。
+> 当 8 个渠道花费之和为 0 时无法计算 ROAS，接口返回 `400`。
 
 预处理说明：
 
@@ -157,11 +180,10 @@ curl -X POST http://localhost/predict \
   -H "Content-Type: application/json" -d @sample_payload.json
 ```
 
-Compose 启动两个服务，二者通过 `app-net` 桥接网络互通：
+Compose 启动两个服务：
 
-- `api`：`sales-forecast-api:latest`，不向宿主机映射端口；Dockerfile 中的 `EXPOSE 8000` 仅用于容器网络内访问，镜像自带的 HEALTHCHECK 仍会监控服务状态。
-- `nginx`：`nginx:alpine`，宿主机 `80 → 容器 80`，将 `nginx.conf` 挂载为 `/etc/nginx/conf.d/default.conf`，通过 `depends_on` 在 API 启动后启动（不等待健康检查）。
-- 两个服务均设置 `restart: always`。
+- `api`：`sales-forecast-api:latest`，仅 `expose 8000`，不映射到宿主机。
+- `nginx`：`nginx:alpine`，宿主机 `80 → 容器 80`，挂载 `nginx.conf`，等待 API 健康后启动。
 
 常用命令：
 

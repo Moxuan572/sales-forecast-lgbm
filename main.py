@@ -20,7 +20,9 @@
   - 用一条示例请求跑通 preprocess, 确认输出列与 metadata 完全一致
 
 接口:
-  POST /predict  ->  {"predicted_sales": 2288907.42}
+  POST /predict  ->  {"predicted_sales": "2434879.82",
+                      "predicted_roas": "3.96",
+                      "action": "观察 (Observe)"}
   GET  /health   ->  健康检查
   GET  /docs     ->  Swagger UI
 
@@ -119,8 +121,25 @@ class PredictRequest(BaseModel):
         return value
 
 
+Action = Literal["放量 (Scale Up)", "观察 (Observe)", "止损 (Cut Loss)"]
+
+
+def decide_action(predicted_roas: float) -> Action:
+    """根据预测 ROAS 给出投放建议。"""
+    if predicted_roas > 5.0:
+        return "放量 (Scale Up)"
+    if predicted_roas >= 2.0:
+        return "观察 (Observe)"
+    return "止损 (Cut Loss)"
+
+
 class PredictResponse(BaseModel):
-    predicted_sales: float = Field(..., description="预测销售额")
+    predicted_sales: str = Field(..., description="预测销售额, 严格保留两位小数的字符串")
+    predicted_roas: str = Field(
+        ...,
+        description="预测 ROAS = 预测销售额 / 总花费, 严格保留两位小数的字符串",
+    )
+    action: Action = Field(..., description="基于 ROAS 阈值的投放建议")
 
 
 class ModelState:
@@ -301,13 +320,28 @@ def get_state(request: Request) -> ModelState:
 def predict(payload: PredictRequest, request: Request) -> PredictResponse:
     state = get_state(request)
 
+    total_spend = sum(float(getattr(payload, col)) for col in SPEND_COLS)
+    if total_spend <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="8 个渠道花费之和为 0，无法计算 ROAS",
+        )
+
     try:
         row = preprocess(payload, state)
         prediction = float(state.model.predict(row)[0])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"预测失败: {exc}") from exc
 
-    return PredictResponse(predicted_sales=prediction)
+    # 先格式化为严格两位小数的字符串, 再用同一个值做决策,
+    # 避免展示值与 action 矛盾
+    predicted_sales = f"{prediction:.2f}"
+    predicted_roas = f"{prediction / total_spend:.2f}"
+    return PredictResponse(
+        predicted_sales=predicted_sales,
+        predicted_roas=predicted_roas,
+        action=decide_action(float(predicted_roas)),
+    )
 
 
 @app.get("/health", summary="健康检查")
