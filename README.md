@@ -18,7 +18,7 @@ FastAPI（sales-forecast-api）
 sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 ```
 
-只有 Nginx 对外暴露 80 端口，FastAPI 的 8000 端口仅在 Docker 网络内可见。
+只有 Nginx 向宿主机映射 80 端口；`api` 不映射端口，二者通过 `app-net` 桥接网络通信。FastAPI 的 8000 端口仅在 Docker 网络内可见。
 
 ## 目录结构
 
@@ -157,10 +157,11 @@ curl -X POST http://localhost/predict \
   -H "Content-Type: application/json" -d @sample_payload.json
 ```
 
-Compose 启动两个服务：
+Compose 启动两个服务，二者通过 `app-net` 桥接网络互通：
 
-- `api`：`sales-forecast-api:latest`，仅 `expose 8000`，不映射到宿主机。
-- `nginx`：`nginx:alpine`，宿主机 `80 → 容器 80`，挂载 `nginx.conf`，等待 API 健康后启动。
+- `api`：`sales-forecast-api:latest`，不向宿主机映射端口；Dockerfile 中的 `EXPOSE 8000` 仅用于容器网络内访问，镜像自带的 HEALTHCHECK 仍会监控服务状态。
+- `nginx`：`nginx:alpine`，宿主机 `80 → 容器 80`，将 `nginx.conf` 挂载为 `/etc/nginx/conf.d/default.conf`，通过 `depends_on` 在 API 启动后启动（不等待健康检查）。
+- 两个服务均设置 `restart: always`。
 
 常用命令：
 
