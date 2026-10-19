@@ -25,12 +25,14 @@ sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 ```
 .
 ├── train_model.py                        # 训练、评估、导出模型
-├── mmm_dataset.csv                       # 原始周度数据（209 行）
+├── mmm_dataset.csv                       # 旧版周度数据（缺失全为 NaN）
+├── mmm_dataset.xlsx                      # 当前训练数据（0=结构性，NaN=技术性）
 ├── sales_forecast_lgbm.pkl               # 训练好的 LightGBM 模型
 ├── sales_forecast_lgbm_metadata.json     # 特征顺序、类别取值、指标
 ├── main.py                               # FastAPI 服务 + preprocess()
 ├── sample_payload.json                   # 请求示例
-├── requirements.txt                      # 锁定依赖版本
+├── requirements.txt                      # API 运行依赖
+├── requirements-train.txt                # 训练依赖（含 openpyxl）
 ├── Dockerfile                            # API 镜像
 ├── .dockerignore
 ├── nginx.conf                            # 反向代理配置
@@ -42,7 +44,11 @@ sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 
 - 数据范围：2022-01-03 至 2025-12-29，共 209 个自然周。
 - 缺失值处理：
-  - 8 个渠道花费列共 434 个缺失单元格 → 填 `0`，表示该周该渠道无花费记录。
+  - 渠道花费：`0` 表示结构性无投放；文本 `"Nan"` / `"None"` / `"null"` 表示技术性缺失（采集/入库失败）。
+  - Excel 默认：文本 `"Nan"` 保留为 NaN，真正的空白单元格按 0 处理；`total_spend` 只汇总已观测渠道。
+  - 当前 `mmm_dataset.xlsx`：422 个结构性 0 + 12 个技术性 NaN（competitor 9、instagram 2、google_ads 1）。
+  - YouTube 的 3 个原空白单元格已按 0 处理，因此 YouTube 没有技术性 NaN。
+  - 旧 `mmm_dataset.csv` 没有 0/NaN 区分，训练脚本默认对它做 0 填充；可用 `--keep-spend-nan` 改为保留 NaN。
   - `sales` 目标列缺失 3 行 → 不填充，建完特征后剔除，最终使用 206 行。
   - 滞后/滚动特征开头产生的 NaN → 保留，由 LightGBM 原生处理。
 - 39 个特征：
@@ -56,17 +62,40 @@ sales_forecast_lgbm.pkl + sales_forecast_lgbm_metadata.json
 | 花费滞后/滚动（10） | 8 个渠道 `*_lag_1` `total_spend_lag_1` `total_spend_roll_4_mean` |
 
 防泄漏：所有 lag/rolling 特征均基于 `shift(1)+`，按时间顺序切分，不打乱数据。
+`total_spend` 只汇总已观测渠道；`n_active_channels` 只统计已观测且花费 > 0 的渠道。
 
 ### 模型指标
 
 | 指标 | 留出集（最后 42 周） | 4 折时间序列 CV |
 |---|---:|---:|
-| MAE | **127,477** | 206,181 |
-| R² | **0.859** | 0.405 |
-| RMSE | 155,671 | — |
-| MAPE | 6.42% | — |
+| MAE | **121,519** | 206,842 |
+| R² | **0.8668** | 0.408 |
+| RMSE | 151,473 | — |
+| MAPE | 6.11% | — |
 
 > 留出集指标来自按时间切分训练出的模型；导出的 `.pkl` 随后在全部 206 行上重新拟合。
+> 当前版本把 YouTube 的缺失按结构性 0 处理，其余 12 个文本 `"Nan"` 保留为技术性缺失。
+> 与全 0 填充基线相比，留出集 MAE 从 127,477 降到 121,519，R² 从 0.859 升到 0.8668；
+> CV MAE 206,842、R² 0.408，与基线基本持平。
+
+## 重新训练
+
+```bash
+pip install -r requirements-train.txt
+python train_model.py mmm_dataset.xlsx
+```
+
+花费缺失策略：
+
+- `.xlsx` 默认：文本 `"Nan"` 保留 NaN（技术性缺失），真正空白填 0（结构性无投放）；
+- `.csv` 默认 0 填充（兼容旧数据）；
+- 显式覆盖：`--zero-fill-spends`（全部填 0）或 `--keep-spend-nan`（全部保留 NaN）。
+
+例如强制把 Excel 中所有缺失都当 0：
+
+```bash
+python train_model.py mmm_dataset.xlsx --zero-fill-spends
+```
 
 ## API
 
@@ -94,8 +123,8 @@ curl -X POST http://localhost/predict \
 
 ```json
 {
-  "predicted_sales": "2434879.82",
-  "predicted_roas": "3.96",
+  "predicted_sales": "2430229.16",
+  "predicted_roas": "3.95",
   "action": "观察 (Observe)"
 }
 ```
@@ -123,9 +152,12 @@ curl -X POST http://localhost/predict \
 
 - `sales_lag_1~4`、`sales_roll_4_*` 由 `sales_history` 的前 4 个值精确计算。
 - 只传 4 个历史值时，`sales_roll_8_mean` 为 NaN（模型可原生处理）；传 8 个可精确计算。
-- 入参不包含历史花费，`*_spend_lag_1`、`total_spend_lag_1`、`total_spend_roll_4_mean` 
+- 入参不包含历史花费，`*_spend_lag_1`、`total_spend_lag_1`、`total_spend_roll_4_mean`
   使用“花费持续”假设，以当周花费近似上周花费。
-  这一简化会使留出集误差从 MAE 127,477 / R² 0.859 降到约 150,612 / 0.782。
+  这一简化会使留出集误差从 MAE 121,519 / R² 0.8668 变为约 MAE 138,376 / R² 0.8265。
+- 训练时技术性缺失的花费保留为 NaN；但当前请求模型要求 8 个花费都传有限数值。
+  线上如果某个渠道是技术性缺失，不能用 0 代替（0 表示结构性无投放），
+  否则 `total_spend` 会被低估、ROAS 会被高估。需要支持 `null` 时再扩展请求模型。
 
 ## 本地运行
 

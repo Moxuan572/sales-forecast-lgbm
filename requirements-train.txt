@@ -1,0 +1,3 @@
+# 训练依赖（读取 .xlsx / .xlsm 需要 openpyxl）
+-r requirements.txt
+openpyxl==3.1.5

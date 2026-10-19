@@ -4,14 +4,14 @@
 Kaggle MMM 数据集 —— 周度销售额预测（LightGBM 回归）
 
 流程:
-  1. 数据清洗: 日期解析/排序/去重; 渠道花费缺失按 0 处理; 缺失目标值的样本剔除
+  1. 数据清洗: 日期解析/排序/去重; 渠道花费文本 "Nan" 保留为 NaN(技术性缺失), 真正空白填 0(结构性无投放); 缺失目标值的样本剔除
   2. 特征工程: 时间特征、促销/节假日、渠道花费、滞后与滚动特征(严格 shift>=1)
   3. 防泄漏: 特征全部只使用 t-1 及更早的信息; 按时间顺序切分, 不打乱
   4. 训练评估: LightGBM 回归, 输出 MAE / R²; 附带滚动时序交叉验证
   5. 全量重训并导出 sales_forecast_lgbm.pkl
 
 用法:
-  python3 train_model.py [数据文件路径]
+  python3 train_model.py [数据文件路径] [--zero-fill-spends | --keep-spend-nan]
 """
 
 from __future__ import annotations
@@ -62,25 +62,97 @@ LGBM_PARAMS = dict(
 )
 
 
-def load_and_clean(path: Path) -> tuple[pd.DataFrame, dict]:
-    """读取数据并完成基础清洗。"""
-    df = pd.read_csv(path, encoding="utf-8-sig")  # 去除 BOM
+def read_dataset(path: Path) -> pd.DataFrame:
+    """按扩展名读取 CSV / Excel，并统一列名。"""
+    if path.suffix.lower() in {".xlsx", ".xlsm"}:
+        df = pd.read_excel(path)
+    else:
+        df = pd.read_csv(path, encoding="utf-8-sig")  # 去除 BOM
     df.columns = [c.strip() for c in df.columns]
-    df["date"] = pd.to_datetime(df["date"], format="%d-%m-%Y")
+    return df
+
+
+def load_and_clean(
+    path: Path,
+    zero_fill_spends: bool = False,
+    blank_as_zero: bool = False,
+) -> tuple[pd.DataFrame, dict]:
+    """读取数据并完成基础清洗。
+
+    花费缺失分两类:
+      - 文本 "Nan"/"None"/"null": 显式技术性缺失标记, 保留 NaN;
+      - 真正的空白单元格 / 空字符串: 结构性无投放, 填 0。
+
+    zero_fill_spends=True: 所有花费缺失都填 0 (兼容旧流程);
+    blank_as_zero=True:    只把真正的空白填 0, 文本 "Nan" 保留 NaN;
+    两者都为 False:        所有花费缺失都保留 NaN。
+    """
+    df = read_dataset(path)
+
+    # date 可能是字符串(03-01-2022)或 Excel 日期单元格
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], format="%d-%m-%Y")
     df = df.sort_values("date").drop_duplicates().reset_index(drop=True)
 
-    # 渠道花费缺失: 缺失周的销售额显著低于有花费的周(如 google_ads:
-    # 208 万 vs 247 万), 说明缺失代表"该渠道当周未投放", 因此填 0。
+    # 先区分“文本技术性缺失”与“真正空白”，再数值化。
+    # 这样 fillna(0) 不会把文本 "Nan" 也当成结构性 0。
+    technical_missing = pd.DataFrame(False, index=df.index, columns=SPEND_COLS)
+    blank_missing = pd.DataFrame(False, index=df.index, columns=SPEND_COLS)
+    for col in SPEND_COLS:
+        values = df[col]
+        if values.dtype == object:
+            stripped = values.map(lambda v: v.strip() if isinstance(v, str) else v)
+            technical_missing[col] = stripped.map(
+                lambda v: isinstance(v, str) and v.lower() in {"nan", "none", "null"}
+            )
+            blank_missing[col] = stripped.map(
+                lambda v: isinstance(v, str) and v == ""
+            )
+            values = stripped.where(~blank_missing[col], np.nan)
+        numeric = pd.to_numeric(values, errors="coerce")
+        # 非空但无法解析的文本也按技术性缺失处理，避免被误填成 0。
+        technical_missing[col] = technical_missing[col] | (values.notna() & numeric.isna())
+        df[col] = numeric
+    # 非文本列中的 NaN（Excel 真空白）也归入 blank_missing
+    blank_missing = blank_missing | (df[SPEND_COLS].isna() & ~technical_missing)
+
+    # 目标/其他字段也做数值化与去空格
+    df["sales"] = pd.to_numeric(df["sales"], errors="coerce")
+    df["holiday"] = pd.to_numeric(df["holiday"], errors="coerce").astype(int)
+    df["sales_promotion"] = df["sales_promotion"].astype(str).str.strip()
+
+    # 渠道花费: 0 = 结构性无投放; NaN = 技术性缺失(采集/入库失败)。
     spend_missing = df[SPEND_COLS].isna().sum().astype(int).to_dict()
-    df[SPEND_COLS] = df[SPEND_COLS].fillna(0.0)
+    spend_zero_in_source = (df[SPEND_COLS] == 0).sum().astype(int).to_dict()
+    technical_missing_counts = technical_missing.sum().astype(int).to_dict()
+    blank_missing_counts = blank_missing.sum().astype(int).to_dict()
+
+    if zero_fill_spends:
+        df[SPEND_COLS] = df[SPEND_COLS].fillna(0.0)
+        policy = "fill_zero"
+    elif blank_as_zero:
+        df[SPEND_COLS] = df[SPEND_COLS].mask(blank_missing, 0.0)
+        policy = "blank_zero_keep_text_nan"
+    else:
+        policy = "keep_as_nan"
+    df[SPEND_COLS] = df[SPEND_COLS].astype("float64")
+    spend_zero_after_policy = (df[SPEND_COLS] == 0).sum().astype(int).to_dict()
+    spend_missing_after_policy = df[SPEND_COLS].isna().sum().astype(int).to_dict()
 
     # 目标缺失的样本无法用于监督学习, 在特征构建后删除
     target_missing = int(df["sales"].isna().sum())
 
     report = {
+        "source_file": path.name,
         "rows_raw": int(len(df)),
         "date_range": [df["date"].min().strftime("%Y-%m-%d"), df["date"].max().strftime("%Y-%m-%d")],
-        "spend_missing_filled_with_zero": spend_missing,
+        "spend_missing_policy": policy,
+        "spend_missing_counts": spend_missing,
+        "spend_technical_missing_counts": technical_missing_counts,
+        "spend_blank_cells_filled_zero": blank_missing_counts if blank_as_zero else {c: 0 for c in SPEND_COLS},
+        "spend_missing_counts_after_policy": spend_missing_after_policy,
+        "spend_zero_cells_in_source": spend_zero_in_source,
+        "spend_zero_cells_after_policy": spend_zero_after_policy,
         "target_missing_dropped": target_missing,
     }
     return df, report
@@ -91,8 +163,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
 
     # --- 营销花费特征 ---
-    d[SPEND_COLS] = d[SPEND_COLS].fillna(0.0)
-    d["total_spend"] = d[SPEND_COLS].sum(axis=1)
+    # 技术性缺失的渠道保留 NaN, 由 LightGBM 原生处理。
+    # total_spend 只汇总已观测渠道; n_active_channels 只统计已观测且 >0 的渠道。
+    d["total_spend"] = d[SPEND_COLS].sum(axis=1, skipna=True)
     d["n_active_channels"] = (d[SPEND_COLS] > 0).sum(axis=1)
 
     # --- 时间特征 ---
@@ -166,18 +239,51 @@ def format_metrics(metrics: dict) -> str:
 
 
 def main() -> None:
-    data_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DATA_PATH
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    data_path = Path(args[0]) if args else DEFAULT_DATA_PATH
     if not data_path.exists():
         raise FileNotFoundError(f"找不到数据文件: {data_path}")
+
+    # 默认:
+    #   Excel: 真正空白 -> 0; 文本 "Nan"/"None"/"null" -> 保留 NaN
+    #   CSV:   旧格式, 所有缺失 -> 0 (兼容旧流程)
+    # 显式 --zero-fill-spends / --keep-spend-nan 可覆盖。
+    is_excel = data_path.suffix.lower() in {".xlsx", ".xlsm"}
+    if "--zero-fill-spends" in flags:
+        zero_fill_spends = True
+        blank_as_zero = False
+    elif "--keep-spend-nan" in flags:
+        zero_fill_spends = False
+        blank_as_zero = False
+    else:
+        zero_fill_spends = not is_excel
+        blank_as_zero = is_excel
 
     print("=" * 62)
     print("1) 读取与清洗数据")
     print("=" * 62)
-    raw, clean_report = load_and_clean(data_path)
+    raw, clean_report = load_and_clean(
+        data_path, zero_fill_spends=zero_fill_spends, blank_as_zero=blank_as_zero
+    )
+    print(f"数据文件  : {clean_report['source_file']}")
     print(f"原始样本数: {clean_report['rows_raw']}")
     print(f"日期范围  : {clean_report['date_range'][0]} ~ {clean_report['date_range'][1]}")
     print(f"目标缺失丢弃: {clean_report['target_missing_dropped']} 行")
-    print(f"渠道花费缺失填 0: {clean_report['spend_missing_filled_with_zero']}")
+    print(f"花费缺失策略: {clean_report['spend_missing_policy']}")
+    spend_missing = clean_report["spend_missing_counts"]
+    print(f"原始缺失花费单元格: {sum(spend_missing.values())} 个 -> {spend_missing}")
+    blank_zero = clean_report["spend_blank_cells_filled_zero"]
+    print(f"真正空白按 0 处理: {sum(blank_zero.values())} 个 -> {blank_zero}")
+    tech_missing = clean_report["spend_technical_missing_counts"]
+    print(f"文本技术性缺失(保留 NaN): {sum(tech_missing.values())} 个 -> {tech_missing}")
+    final_missing = clean_report["spend_missing_counts_after_policy"]
+    print(f"处理后仍为 NaN: {sum(final_missing.values())} 个 -> {final_missing}")
+    print(
+        "花费 0 值单元格: 源文件 "
+        f"{sum(clean_report['spend_zero_cells_in_source'].values())} 个 -> 处理后 "
+        f"{sum(clean_report['spend_zero_cells_after_policy'].values())} 个"
+    )
 
     print("\n" + "=" * 62)
     print("2) 特征工程 (滞后特征严格 shift>=1, 防止数据泄漏)")

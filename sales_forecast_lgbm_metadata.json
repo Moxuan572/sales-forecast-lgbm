@@ -3,15 +3,67 @@
   "task": "weekly sales forecasting (regression)",
   "target": "sales",
   "data": {
+    "source_file": "mmm_dataset.xlsx",
     "rows_raw": 209,
     "date_range": [
       "2022-01-03",
       "2025-12-29"
     ],
-    "spend_missing_filled_with_zero": {
+    "spend_missing_policy": "blank_zero_keep_text_nan",
+    "spend_missing_counts": {
       "competitor_spend": 9,
-      "instagram_spend": 50,
-      "google_ads_spend": 80,
+      "instagram_spend": 2,
+      "google_ads_spend": 1,
+      "tv_spend": 0,
+      "youtube_spend": 0,
+      "newspaper_spend": 0,
+      "influencer_spend": 0,
+      "ott_spend": 0
+    },
+    "spend_technical_missing_counts": {
+      "competitor_spend": 9,
+      "instagram_spend": 2,
+      "google_ads_spend": 1,
+      "tv_spend": 0,
+      "youtube_spend": 0,
+      "newspaper_spend": 0,
+      "influencer_spend": 0,
+      "ott_spend": 0
+    },
+    "spend_blank_cells_filled_zero": {
+      "competitor_spend": 0,
+      "instagram_spend": 0,
+      "google_ads_spend": 0,
+      "tv_spend": 0,
+      "youtube_spend": 0,
+      "newspaper_spend": 0,
+      "influencer_spend": 0,
+      "ott_spend": 0
+    },
+    "spend_missing_counts_after_policy": {
+      "competitor_spend": 9,
+      "instagram_spend": 2,
+      "google_ads_spend": 1,
+      "tv_spend": 0,
+      "youtube_spend": 0,
+      "newspaper_spend": 0,
+      "influencer_spend": 0,
+      "ott_spend": 0
+    },
+    "spend_zero_cells_in_source": {
+      "competitor_spend": 0,
+      "instagram_spend": 48,
+      "google_ads_spend": 79,
+      "tv_spend": 57,
+      "youtube_spend": 65,
+      "newspaper_spend": 64,
+      "influencer_spend": 59,
+      "ott_spend": 50
+    },
+    "spend_zero_cells_after_policy": {
+      "competitor_spend": 0,
+      "instagram_spend": 48,
+      "google_ads_spend": 79,
       "tv_spend": 57,
       "youtube_spend": 65,
       "newspaper_spend": 64,
@@ -96,14 +148,14 @@
   },
   "cv": {
     "folds": 4,
-    "mean_MAE": 206180.9128946429,
-    "mean_R2": 0.405133908585343
+    "mean_MAE": 206841.84318807986,
+    "mean_R2": 0.4080945608562825
   },
   "holdout_metrics": {
-    "MAE": 127477.20760049664,
-    "R2": 0.859302507074532,
-    "RMSE": 155671.19438409395,
-    "MAPE_%": 6.421937678665195
+    "MAE": 121519.22724671844,
+    "R2": 0.8667894601120043,
+    "RMSE": 151472.70193996813,
+    "MAPE_%": 6.114165003334128
   },
   "note": "holdout metrics are from the model trained on the first split; the exported model is refit on all labeled rows"
 }
